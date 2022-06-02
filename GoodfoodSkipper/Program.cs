@@ -12,7 +12,8 @@ var host = Host.CreateDefaultBuilder(args)
     {
         builder
             .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-            .AddUserSecrets(typeof(Program).Assembly, true);
+            .AddUserSecrets(typeof(Program).Assembly, true)
+            .AddEnvironmentVariables();
     })
     .ConfigureLogging(log =>
     {
