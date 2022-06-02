@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "GoodfoodSkipper": {
+      "commandName": "Project"
+    },
+    "Docker": {
+      "commandName": "Docker"
+    }
+  }
+}
