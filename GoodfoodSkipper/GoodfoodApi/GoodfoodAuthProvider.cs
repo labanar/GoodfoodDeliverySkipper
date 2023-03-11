@@ -54,18 +54,21 @@ namespace GoodfoodSkipper.GoodfoodApi
             }
         }
 
-        private static string ExtractUserIdFromIdToken(ReadOnlySpan<char> token)
+        private static string ExtractUserIdFromIdToken(string token)
         {
-            var delimeterPos = token.IndexOf('.');
-            var remaining = token.Slice(delimeterPos + 1);
-            var finalDelimiterPos = remaining.IndexOf('.');
-            var encodedClaims = remaining.Slice(0, finalDelimiterPos);
+            var encodedClaims = token.Split('.', 2).Last().Split('.').First();
+            var remainder = encodedClaims.Length % 4;
+            if (remainder == 2)
+            {
+                encodedClaims = encodedClaims + "==";
+            }
+            else if (remainder == 3)
+            {
+                encodedClaims = encodedClaims + "=";
+            }
 
-            Span<byte> claimBytes = new byte[encodedClaims.Length * 6 / 8];
-            if (!Convert.TryFromBase64Chars(encodedClaims, claimBytes, out var _))
-                throw new Exception("Error parsing UserId from IdToken");
-
-            var claims = JsonSerializer.Deserialize<GoodfoodAuthTokenCliams>(claimBytes);
+            var claimsJson = Convert.FromBase64String(encodedClaims);
+            var claims = JsonSerializer.Deserialize<GoodfoodAuthTokenCliams>(claimsJson);
 
             if (claims == null)
                 throw new Exception("Error deserializing claims from IdToken");
