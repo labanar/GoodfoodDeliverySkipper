@@ -5,63 +5,41 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
+using Serilog;
+using Serilog.Core;
+using Serilog.Sinks.Grafana.Loki;
 
-var host = Host.CreateDefaultBuilder(args)
-    .ConfigureAppConfiguration((ctx, builder) =>
-    {
-        builder
-            .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-            .AddUserSecrets(typeof(Program).Assembly, true)
-            .AddEnvironmentVariables();
-    })
-    .ConfigureLogging(log =>
-    {
-        log.AddConsole();
-    })
-    .ConfigureServices((ctx, services) =>
-    {
-        services.AddLogging(options =>
-        {
-            options.AddConsole();
-        });
-        services.Configure<GoodfoodAuthOptions>(ctx.Configuration.GetSection("GoodfoodAuth"));
-        services.Configure<DiscordOptions>(ctx.Configuration.GetSection("Discord"));
-        services.AddHttpClient<GoodfoodApiClient>();
-        services.AddHttpClient<GoogleIdentityToolkitClient>();
-        services.AddSingleton<GoodfoodAuthProvider>();
-        services.AddSingleton<GoodfoodDeliverySkipper>();
-    })
-    .UseConsoleLifetime()
-    .Build();
+var builder = Host.CreateApplicationBuilder(args);
+builder.Logging.ClearProviders();
+builder.Logging.AddSerilog(BuildLogger(builder.Configuration));
+builder.Services.Configure<GoodfoodAuthOptions>(builder.Configuration.GetSection("GoodfoodAuth"));
+builder.Services.Configure<DiscordOptions>(builder.Configuration.GetSection("Discord"));
+builder.Services.AddHttpClient<GoodfoodApiClient>();
+builder.Services.AddHttpClient<GoogleIdentityToolkitClient>();
+builder.Services.AddSingleton<GoodfoodAuthProvider>();
+builder.Services.AddSingleton<GoodfoodDeliverySkipper>();
+builder.Services.AddHostedService<DeliverySkipBackgroundService>();
 
-await host.StartAsync();
-var observerSubscriptions = new List<IDisposable>();
-var skipper = host.Services.GetRequiredService<GoodfoodDeliverySkipper>();
-var discordOptions = host.Services.GetRequiredService<IOptions<DiscordOptions>>();
+var app = builder.Build();
+app.Run();
 
-if(!string.IsNullOrEmpty(discordOptions.Value.WebhookUrl))
+
+static Logger BuildLogger(IConfiguration configuration)
 {
-    observerSubscriptions.Add(
-        skipper.DeliverySkipSuccess.Subscribe(successEvent =>
-        {
-            var client = new Discord.Webhook.DiscordWebhookClient(discordOptions.Value.WebhookUrl);
-            client.SendMessageAsync($"Skipped delivery for {successEvent.DeliveryDate.ToString("yyyy-MM-dd")}");
-        }));
+    var lokiUrl = configuration.GetValue<string>("GrafanaLokiUrl");
+    var config = new LoggerConfiguration();
+    config.WriteTo.Console();
 
-    observerSubscriptions.Add(
-        skipper.DeliverySkipFailure.Subscribe(failureEvent =>
+    if (!string.IsNullOrEmpty(lokiUrl))
+        config.WriteTo.GrafanaLoki(lokiUrl, new LokiLabel[]
         {
-            var client = new Discord.Webhook.DiscordWebhookClient(discordOptions.Value.WebhookUrl);
-            client.SendMessageAsync($"Error skipping delivery for {failureEvent.DeliveryDate.ToString("yyyy-MM-dd")}");
-        }));
+            new()
+            {
+                Key = "app_name",
+                Value = "goodfood_skipper"
+            }
+        });
+
+    return config.CreateLogger();
 }
-
-
-await skipper.SkipAllDeliveries();
-
-foreach (var subscription in observerSubscriptions)
-    subscription?.Dispose();
-
-await host.StopAsync();
 
